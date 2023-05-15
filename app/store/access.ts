@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { StoreKey } from "../constant";
-import { getHeaders } from "../client/api";
+import { getHeaders } from "../requests";
 import { BOT_HELLO } from "./chat";
 import { ALL_MODELS } from "./config";
 
@@ -12,6 +12,7 @@ export interface AccessControlStore {
   needCode: boolean;
   hideUserApiKey: boolean;
   openaiUrl: string;
+  midJourneyAPI: string;
 
   updateToken: (_: string) => void;
   updateCode: (_: string) => void;
@@ -30,6 +31,7 @@ export const useAccessStore = create<AccessControlStore>()(
       needCode: true,
       hideUserApiKey: false,
       openaiUrl: "/api/openai/",
+      midJourneyAPI: "/api/midjourney/",
 
       enabledAccessControl() {
         get().fetch();

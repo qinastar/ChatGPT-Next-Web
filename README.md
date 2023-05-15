@@ -21,6 +21,20 @@ One-Click to deploy well-designed ChatGPT web UI on Vercel.
 
 </div>
 
+### 如何使用Midjourney
+- 在.env.local(没有要创建)中添加MIDJOURNEY_API_KEY、MIDJOURNEY_API_URL。接口地址和key
+  ```local
+   示例:
+   OPENAI_API_KEY=sk-xxx
+   MIDJOURNEY_API_KEY=35fc0377-ca20-4244-8e44-7a930b7591ab
+   MIDJOURNEY_API_URL=https://api.zxx.im/
+   ```
+- 输入/mj 即可使用绘图模式
+- 绘图期间请勿刷新网页、切换别的聊天窗口。
+- [MidjourneyAPI](https://midjourneyapi.zxx.im/)
+
+![](https://s3.bmp.ovh/imgs/2023/05/15/f0c7f67ef3eb075b.png)
+
 ## Features
 
 - **Deploy for free with one-click** on Vercel in under 1 minute
@@ -31,7 +45,7 @@ One-Click to deploy well-designed ChatGPT web UI on Vercel.
 - New in v2: create, share and debug your chat tools with prompt templates (mask)
 - Awesome prompts powered by [awesome-chatgpt-prompts-zh](https://github.com/PlexPt/awesome-chatgpt-prompts-zh) and [awesome-chatgpt-prompts](https://github.com/f/awesome-chatgpt-prompts)
 - Automatically compresses chat history to support long conversations while also saving your tokens
-- I18n: English, 简体中文, 繁体中文, 日本語, Español, Italiano, Türkçe, Deutsch, Tiếng Việt, Русский, Čeština
+- I18n: English, 简体中文, 繁体中文, 日本語, Español, Italiano, Türkçe, Deutsch
 
 ## Roadmap
 
@@ -62,7 +76,7 @@ One-Click to deploy well-designed ChatGPT web UI on Vercel.
 - 预制角色功能（面具），方便地创建、分享和调试你的个性化对话
 - 海量的内置 prompt 列表，来自[中文](https://github.com/PlexPt/awesome-chatgpt-prompts-zh)和[英文](https://github.com/f/awesome-chatgpt-prompts)
 - 自动压缩上下文聊天记录，在节省 Token 的同时支持超长对话
-- 多国语言支持：English, 简体中文, 繁体中文, 日本語, Español, Italiano, Türkçe, Deutsch, Tiếng Việt, Русский, Čeština
+- 多国语言支持：English, 简体中文, 繁体中文, 日本語, Español, Italiano, Türkçe, Deutsch
 - 拥有自己的域名？好上加好，绑定后即可在任何地方**无障碍**快速访问
 
 ## 开发计划

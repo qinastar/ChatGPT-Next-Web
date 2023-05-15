@@ -1,6 +1,14 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { ChatCompletionResponseMessage } from "openai";
+import {
+  ControllerPool,
+  requestChatStream,
+  requestImage,
+  requestImageResult,
+  requestWithPrompt,
+} from "../requests";
 import { trimTopic } from "../utils";
 
 import Locale from "../locales";
@@ -8,19 +16,20 @@ import { showToast } from "../components/ui-lib";
 import { ModelType } from "./config";
 import { createEmptyMask, Mask } from "./mask";
 import { StoreKey } from "../constant";
-import { api, RequestMessage } from "../client/api";
-import { ChatControllerPool } from "../client/controller";
-import { prettyObject } from "../utils/format";
 
-export type ChatMessage = RequestMessage & {
+export type Message = ChatCompletionResponseMessage & {
   date: string;
   streaming?: boolean;
   isError?: boolean;
   id?: number;
   model?: ModelType;
+  taskId?: string;
+  imageId?: string;
+  clickedList?: [];
+  type?: "chat" | "image" | "imageResult";
 };
 
-export function createMessage(override: Partial<ChatMessage>): ChatMessage {
+export function createMessage(override: Partial<Message>): Message {
   return {
     id: Date.now(),
     date: new Date().toLocaleString(),
@@ -29,6 +38,8 @@ export function createMessage(override: Partial<ChatMessage>): ChatMessage {
     ...override,
   };
 }
+
+export const ROLES: Message["role"][] = ["system", "user", "assistant"];
 
 export interface ChatStat {
   tokenCount: number;
@@ -42,7 +53,7 @@ export interface ChatSession {
   topic: string;
 
   memoryPrompt: string;
-  messages: ChatMessage[];
+  messages: Message[];
   stat: ChatStat;
   lastUpdate: number;
   lastSummarizeIndex: number;
@@ -51,7 +62,7 @@ export interface ChatSession {
 }
 
 export const DEFAULT_TOPIC = Locale.Store.DefaultTopic;
-export const BOT_HELLO: ChatMessage = createMessage({
+export const BOT_HELLO: Message = createMessage({
   role: "assistant",
   content: Locale.Store.BotHello,
 });
@@ -83,24 +94,24 @@ interface ChatStore {
   newSession: (mask?: Mask) => void;
   deleteSession: (index: number) => void;
   currentSession: () => ChatSession;
-  onNewMessage: (message: ChatMessage) => void;
+  onNewMessage: (message: Message) => void;
   onUserInput: (content: string) => Promise<void>;
   summarizeSession: () => void;
-  updateStat: (message: ChatMessage) => void;
+  updateStat: (message: Message) => void;
   updateCurrentSession: (updater: (session: ChatSession) => void) => void;
   updateMessage: (
     sessionIndex: number,
     messageIndex: number,
-    updater: (message?: ChatMessage) => void,
+    updater: (message?: Message) => void,
   ) => void;
   resetSession: () => void;
-  getMessagesWithMemory: () => ChatMessage[];
-  getMemoryPrompt: () => ChatMessage;
+  getMessagesWithMemory: () => Message[];
+  getMemoryPrompt: () => Message;
 
   clearAllData: () => void;
 }
 
-function countMessages(msgs: ChatMessage[]) {
+function countMessages(msgs: Message[]) {
   return msgs.reduce((pre, cur) => pre + cur.content.length, 0);
 }
 
@@ -228,19 +239,21 @@ export const useChatStore = create<ChatStore>()(
           session.lastUpdate = Date.now();
         });
         get().updateStat(message);
-        get().summarizeSession();
+        if (!message.type || !message.type.includes("image")) {
+          get().summarizeSession();
+        }
       },
 
       async onUserInput(content) {
         const session = get().currentSession();
         const modelConfig = session.mask.modelConfig;
 
-        const userMessage: ChatMessage = createMessage({
+        const userMessage: Message = createMessage({
           role: "user",
           content,
         });
 
-        const botMessage: ChatMessage = createMessage({
+        const botMessage: Message = createMessage({
           role: "assistant",
           streaming: true,
           id: userMessage.id! + 1,
@@ -249,7 +262,7 @@ export const useChatStore = create<ChatStore>()(
 
         const systemInfo = createMessage({
           role: "system",
-          content: `IMPORTANT: You are a virtual assistant powered by the ${
+          content: `IMPRTANT: You are a virtual assistant powered by the ${
             modelConfig.model
           } model, now time is ${new Date().toLocaleString()}}`,
           id: botMessage.id! + 1,
@@ -270,57 +283,165 @@ export const useChatStore = create<ChatStore>()(
           session.messages.push(botMessage);
         });
 
+        let res = {};
         // make request
         console.log("[User Input] ", sendMessages);
-        api.llm.chat({
-          messages: sendMessages,
-          config: { ...modelConfig, stream: true },
-          onUpdate(message) {
-            botMessage.streaming = true;
-            botMessage.content = message;
-            set(() => ({}));
-          },
-          onFinish(message) {
-            botMessage.streaming = false;
-            botMessage.content = message;
-            get().onNewMessage(botMessage);
-            ChatControllerPool.remove(
-              sessionIndex,
-              botMessage.id ?? messageIndex,
+        let lastMessage = sendMessages[sendMessages.length - 1];
+        let op = "";
+        if (lastMessage.content.startsWith("/mj")) {
+          console.log(">>> 绘图模式 <<<");
+          // 请求API
+          if (lastMessage.content.startsWith("/mj UPSCALE")) {
+            let ops = lastMessage.content.split("|");
+            op = "UPSCALE";
+            res = await requestImage(
+              "UPSCALE",
+              true,
+              undefined,
+              Number(ops[2]),
+              ops[1],
             );
-            set(() => ({}));
-          },
-          onError(error) {
-            const isAborted = error.message.includes("aborted");
-            if (
-              botMessage.content !== Locale.Error.Unauthorized &&
-              !isAborted
-            ) {
-              botMessage.content += "\n\n" + Locale.Store.Error;
-            } else if (botMessage.content.length === 0) {
-              botMessage.content = prettyObject(error);
-            }
-            botMessage.streaming = false;
-            userMessage.isError = !isAborted;
-            botMessage.isError = !isAborted;
+          } else if (lastMessage.content.startsWith("/mj VARIATION")) {
+            let ops = lastMessage.content.split("|");
+            op = "VARIATION";
+            res = await requestImage(
+              "VARIATION",
+              true,
+              undefined,
+              Number(ops[2]),
+              ops[1],
+            );
+          } else if (lastMessage.content.startsWith("/mj RESET")) {
+            let ops = lastMessage.content.split("|");
+            op = "RESET";
+            res = await requestImage(
+              "RESET",
+              true,
+              undefined,
+              undefined,
+              ops[1],
+            );
+          } else {
+            res = await requestImage("CREATE_IMAGE", true, lastMessage.content);
+          }
 
-            set(() => ({}));
-            ChatControllerPool.remove(
-              sessionIndex,
-              botMessage.id ?? messageIndex,
-            );
+          let hisMsg = [];
+          console.log(">>> 绘图结果：", res);
+          get().updateCurrentSession((session) => {
+            botMessage.streaming = false;
+            botMessage.type = "image";
+          });
+          if (res.success) {
+            hisMsg.push(res.result.msg);
+            botMessage.taskId = res.result.taskId;
+            let status = 0;
+            // 起一个定时器每5秒请求一次直到返回状态大于2
+            let timer = setInterval(async () => {
+              let response = await requestImageResult(res.result.taskId);
+              console.log(">>> 正在绘图：", response);
+              if (response.success) {
+                if (status == 0 || status !== response.result.status) {
+                  hisMsg.push(response.result.msg);
+                  let hisMsgGether = "";
+                  if (hisMsg.length > 1) {
+                    // 除了最后一次全部加 ～～～～
+                    for (var i = 0; i < hisMsg.length - 1; i++) {
+                      hisMsgGether += "~~" + hisMsg[i] + "~~" + "\n";
+                    }
+                    hisMsgGether += hisMsg[hisMsg.length - 1];
+                  } else {
+                    hisMsgGether = hisMsg[0];
+                  }
+                  botMessage.content = hisMsgGether;
+                  status = response.result.status;
+                  get().updateCurrentSession((session) => {
+                    botMessage.streaming = false;
+                  });
+                }
+                // 删除定时器
+                if (response.result.status === 2) {
+                  clearInterval(timer);
+                  // 发图片 ![](图片链接)
+                  const imgMsg: Message = createMessage({
+                    role: "assistant",
+                    streaming: true,
+                    id: userMessage.id! + 1,
+                    model: modelConfig.model,
+                    type: op == "UPSCALE" ? "image" : "imageResult",
+                    clickedList: [],
+                  });
+                  const sessionIndex = get().currentSessionIndex;
+                  const messageIndex =
+                    get().currentSession().messages.length + 1;
+                  get().updateCurrentSession((session) => {
+                    session.messages.push(imgMsg);
+                    imgMsg.content = `![${response.result.prompt}](${response.result.imageUrl})`;
+                    imgMsg.imageId = response.result.imageId;
+                    imgMsg.streaming = false;
+                  });
+                  get().onNewMessage(botMessage);
+                  ControllerPool.remove(
+                    sessionIndex,
+                    imgMsg.id ?? messageIndex,
+                  );
+                } else if (response.result.status > 2) {
+                  clearInterval(timer);
+                }
+              }
+            }, 5000);
+          } else if (res.error) {
+            botMessage.content = res.msg;
+          } else {
+            botMessage.content = res.message;
+          }
 
-            console.error("[Chat] error ", error);
-          },
-          onController(controller) {
-            // collect controller for stop/retry
-            ChatControllerPool.addController(
-              sessionIndex,
-              botMessage.id ?? messageIndex,
-              controller,
-            );
-          },
-        });
+          get().onNewMessage(botMessage);
+          ControllerPool.remove(sessionIndex, botMessage.id ?? messageIndex);
+        } else {
+          requestChatStream(sendMessages, {
+            onMessage(content, done) {
+              // stream response
+              if (done) {
+                botMessage.streaming = false;
+                botMessage.content = content;
+                get().onNewMessage(botMessage);
+                ControllerPool.remove(
+                  sessionIndex,
+                  botMessage.id ?? messageIndex,
+                );
+              } else {
+                botMessage.content = content;
+                set(() => ({}));
+              }
+            },
+            onError(error, statusCode) {
+              const isAborted = error.message.includes("aborted");
+              if (statusCode === 401) {
+                botMessage.content = Locale.Error.Unauthorized;
+              } else if (!isAborted) {
+                botMessage.content += "\n\n" + Locale.Store.Error;
+              }
+              botMessage.streaming = false;
+              userMessage.isError = !isAborted;
+              botMessage.isError = !isAborted;
+
+              set(() => ({}));
+              ControllerPool.remove(
+                sessionIndex,
+                botMessage.id ?? messageIndex,
+              );
+            },
+            onController(controller) {
+              // collect controller for stop/retry
+              ControllerPool.addController(
+                sessionIndex,
+                botMessage.id ?? messageIndex,
+                controller,
+              );
+            },
+            modelConfig: { ...modelConfig },
+          });
+        }
       },
 
       getMemoryPrompt() {
@@ -333,7 +454,7 @@ export const useChatStore = create<ChatStore>()(
               ? Locale.Store.Prompt.History(session.memoryPrompt)
               : "",
           date: "",
-        } as ChatMessage;
+        } as Message;
       },
 
       getMessagesWithMemory() {
@@ -388,7 +509,7 @@ export const useChatStore = create<ChatStore>()(
       updateMessage(
         sessionIndex: number,
         messageIndex: number,
-        updater: (message?: ChatMessage) => void,
+        updater: (message?: Message) => void,
       ) {
         const sessions = get().sessions;
         const session = sessions.at(sessionIndex);
@@ -407,38 +528,33 @@ export const useChatStore = create<ChatStore>()(
       summarizeSession() {
         const session = get().currentSession();
 
-        // remove error messages if any
-        const cleanMessages = session.messages.filter((msg) => !msg.isError);
-
         // should summarize topic after chating more than 50 words
         const SUMMARIZE_MIN_LEN = 50;
         if (
           session.topic === DEFAULT_TOPIC &&
-          countMessages(cleanMessages) >= SUMMARIZE_MIN_LEN
+          countMessages(session.messages) >= SUMMARIZE_MIN_LEN
         ) {
-          const topicMessages = cleanMessages.concat(
-            createMessage({
-              role: "user",
-              content: Locale.Store.Prompt.Topic,
-            }),
-          );
-          api.llm.chat({
-            messages: topicMessages,
-            config: {
+          if (
+            session.messages[session.messages.length - 1].content.startsWith(
+              "/mj",
+            )
+          ) {
+            console.log(">>> 绘图模式 <<<");
+            return;
+          } else {
+            requestWithPrompt(session.messages, Locale.Store.Prompt.Topic, {
               model: "gpt-3.5-turbo",
-            },
-            onFinish(message) {
+            }).then((res) => {
               get().updateCurrentSession(
                 (session) =>
-                  (session.topic =
-                    message.length > 0 ? trimTopic(message) : DEFAULT_TOPIC),
+                  (session.topic = res ? trimTopic(res) : DEFAULT_TOPIC),
               );
-            },
-          });
+            });
+          }
         }
 
         const modelConfig = session.mask.modelConfig;
-        let toBeSummarizedMsgs = cleanMessages.slice(
+        let toBeSummarizedMsgs = session.messages.slice(
           session.lastSummarizeIndex,
         );
 
@@ -467,24 +583,26 @@ export const useChatStore = create<ChatStore>()(
           historyMsgLength > modelConfig.compressMessageLengthThreshold &&
           session.mask.modelConfig.sendMemory
         ) {
-          api.llm.chat({
-            messages: toBeSummarizedMsgs.concat({
+          requestChatStream(
+            toBeSummarizedMsgs.concat({
               role: "system",
               content: Locale.Store.Prompt.Summarize,
               date: "",
             }),
-            config: { ...modelConfig, stream: true },
-            onUpdate(message) {
-              session.memoryPrompt = message;
+            {
+              overrideModel: "gpt-3.5-turbo",
+              onMessage(message, done) {
+                session.memoryPrompt = message;
+                if (done) {
+                  console.log("[Memory] ", session.memoryPrompt);
+                  session.lastSummarizeIndex = lastSummarizeIndex;
+                }
+              },
+              onError(error) {
+                console.error("[Summarize] ", error);
+              },
             },
-            onFinish(message) {
-              console.log("[Memory] ", message);
-              session.lastSummarizeIndex = lastSummarizeIndex;
-            },
-            onError(err) {
-              console.error("[Summarize] ", err);
-            },
-          });
+          );
         }
       },
 
