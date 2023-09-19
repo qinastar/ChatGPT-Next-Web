@@ -2,9 +2,10 @@ import { useEffect, useRef, useCallback } from "react";
 
 import styles from "./home.module.scss";
 
+import ShopIcon from "../icons/shop.svg";
 import { IconButton } from "./button";
 import SettingsIcon from "../icons/settings.svg";
-import GithubIcon from "../icons/github.svg";
+//import GithubIcon from "../icons/github.svg";
 import ChatGptIcon from "../icons/chatgpt.svg";
 import AddIcon from "../icons/add.svg";
 import CloseIcon from "../icons/close.svg";
@@ -201,8 +202,8 @@ export function SideBar(props: { className?: string }) {
             </Link>
           </div>
           <div className={styles["sidebar-action"]}>
-            <a href={REPO_URL} target="_blank" rel="noopener noreferrer">
-              <IconButton icon={<GithubIcon />} shadow />
+            <a href="https://shop.yuina.cn/" target="_blank" rel="noopener noreferrer">
+              <IconButton icon={<ShopIcon />} shadow />
             </a>
           </div>
         </div>
