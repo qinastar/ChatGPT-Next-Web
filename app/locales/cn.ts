@@ -8,7 +8,7 @@ const cn = {
   Error: {
     Unauthorized: isApp
       ? "检测到无效 API Key，请前往[设置](/#/settings)页检查 API Key 是否配置正确。"
-      : "访问密码不正确或为空，请在[设置](/#/settings)页填入你自己的 OpenAI API Key。点击左下角[商店](https://shop.yuina.cn)可前往购买OPEN AI账号",
+      : "访问密码不正确或为空，请在[设置](/#/settings)页填入你自己的 OpenAI API Key。",
   },
   Auth: {
     Title: "需要密码",
